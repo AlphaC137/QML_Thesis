@@ -1,174 +1,81 @@
-#from scipy.optimize import root
+from typing import Tuple, Optional
+import numpy as np
 from mpmath import findroot
 import cmath
-import math
-import numpy as np
-from itertools import product
+from dataclasses import dataclass
 
-#Hadamard matrix elements
-u00 = 0.19509;
-u01 =-0.98079; #top right
-u10 = 0.98079; #bottom left
-u11 = 0.19509;
+@dataclass
+class MatrixConfig:
+    u00: float
+    u01: float
+    u10: float
+    u11: float
+    
+class MatrixDecomposition:
+    def __init__(self, config: MatrixConfig):
+        self.u = np.array([[config.u00, config.u01], 
+                          [config.u10, config.u11]])
+        self.search_points = np.linspace(-2*np.pi, 2*np.pi, 20)
+        
+    def find_beta_delta(self) -> Tuple[float, float]:
+        def equations(x):
+            beta, delta = x
+            return [
+                cmath.exp(1j*(beta+delta))-self.u[1,1]/self.u[0,0],
+                cmath.exp(1j*(beta-delta))+self.u[1,0]/self.u[0,1]
+            ]
+            
+        return self._find_minimal_solution(equations)
+    
+    def find_alpha_gamma(self, beta: float, delta: float) -> Tuple[float, float]:
+        def equations(x):
+            alpha, gamma = x
+            return [
+                self.u[1,1]*cmath.exp(-1j*alpha)*cmath.exp(1j*(-beta/2-delta/2))-cmath.cos(gamma/2),
+                self.u[1,0]*cmath.exp(-1j*alpha)*cmath.exp(1j*(-beta/2+delta/2))-cmath.sin(gamma/2)
+            ]
+            
+        return self._find_minimal_solution(equations)
+    
+    def _find_minimal_solution(self, equations) -> Tuple[float, float]:
+        best_solution = None
+        min_magnitude = float('inf')
+        
+        for p1, p2 in np.nditer(np.meshgrid(self.search_points, self.search_points)):
+            try:
+                solution = findroot(equations, (float(p1), float(p2)))
+                magnitude = abs(solution[0].real) + abs(solution[1].real)
+                
+                if magnitude < min_magnitude:
+                    min_magnitude = magnitude
+                    best_solution = (float(solution[0].real), float(solution[1].real))
+                    
+            except (ZeroDivisionError, OverflowError, ValueError):
+                continue
+                
+        if best_solution is None:
+            raise ValueError("No solution found")
+            
+        return best_solution
+        
+    def compute_nu_matrix(self, alpha: float, beta: float, gamma: float, delta: float) -> np.ndarray:
+        nu = np.zeros((2,2), dtype=complex)
+        nu[0,0] = cmath.exp(1j*(alpha-beta/2-delta/2))*cmath.cos(gamma/2)
+        nu[0,1] = -cmath.exp(1j*(alpha-beta/2+delta/2))*cmath.sin(gamma/2)
+        nu[1,0] = cmath.exp(1j*(alpha+beta/2-delta/2))*cmath.sin(gamma/2)
+        nu[1,1] = cmath.exp(1j*(alpha+beta/2+delta/2))*cmath.cos(gamma/2)
+        return nu
+        
+    def decompose(self) -> Optional[np.ndarray]:
+        if self.u[1,0] == 0 or self.u[0,1] == 0:
+            return None
+            
+        beta, delta = self.find_beta_delta()
+        alpha, gamma = self.find_alpha_gamma(beta, delta)
+        return self.compute_nu_matrix(alpha, beta, gamma, delta)
 
-## STILL DOESN'T COPE WITH ZERO ENTRIES IN THE U MATRIX!
-# S phase shift matrix elements
-#u00 = 1.0;
-#u01 = 0.0; #top right
-#u10 = 0.0; #top left
-#u11 = -1.0;
-
-#INITIALIZE SOME VARIABLES
-some_list = [math.pi/4, math.pi/2, 3/4*math.pi, math.pi, 0, -math.pi*1.5, -math.pi, -3/4*math.pi, -math.pi/2, -math.pi/4, 1.5*math.pi];
-alpha = 10;
-beta = 10;
-delta = 10;
-gamma = 10;
-
-if u10 != 0.0 and u01 != 0.0:
-
-	#First find beta & delta
-	def z1(beta,delta):
-		temp=cmath.exp(1j*(beta+delta))-u11/u00;
-		return temp
-
-	def z2(beta,delta):
-		temp=cmath.exp(1j*(beta-delta))+u10/u01;
-		return temp
-
-	#for strtp1 in reversed(some_list):
-		#for strtp2 in reversed(some_list):
-
-	for strtp1, strtp2 in product(reversed(some_list), reversed(some_list)):
-			try:
-				ans =  findroot([z1,z2],(strtp1,strtp2));
-				beta_save = ans[0].real;
-				delta_save = ans[1].real;
-				if abs(beta_save) < abs(beta) and abs(delta_save) < abs(delta):
-					beta = beta_save;
-					delta = delta_save;
-					print "beta:", beta
-					print "delta:", delta
-					break
-			except ZeroDivisionError:
-				print "divide by zero"
-
-	#Move on to finding gamma
-	def z3(alpha,gamma):
-		temp=u11*cmath.exp(-1j*alpha)*cmath.exp(1j*(-beta/2-delta/2))-cmath.cos(gamma/2);
-    		return temp
-	def z4(alpha,gamma):
-		temp=u10*cmath.exp(-1j*alpha)*cmath.exp(1j*(-beta/2+delta/2))-cmath.sin(gamma/2);
-    		return temp
-
-	for strtp1, strtp2 in product(reversed(some_list), reversed(some_list)):
-			try:
-				ans =  findroot([z3,z4],(strtp1,strtp2));
-				alpha_save = ans[0].real;
-				gamma_save = ans[1].real;
-				if abs(alpha_save) < abs(alpha) and abs(gamma_save) < abs(gamma):
-					alpha = alpha_save;
-					gamma = gamma_save;
-					break
-			except ZeroDivisionError:
-				print "divide by zero"
-			except OverflowError:
-				print "overflow"
-	'''
-	def z3(gamma):
-		temp=u11*cmath.exp(-1j*delta)*cmath.tan(gamma/2)-u10;                #-U[1,1]/U[0,0];
-    		return temp
-
-	for strtp1 in reversed(some_list):
-			try:
-				ans =  findroot(z3,strtp1);
-				gamma_save = ans.real;
-				if abs(gamma_save) < abs(gamma):
-					gamma = gamma_save;
-					print "gamma:", gamma
-			except ZeroDivisionError:
-				print "divide by zero"
-
-	#Now compute alpha
-	def z4(alpha):
-		temp=u11*cmath.exp(-1j*(beta/2+delta/2))*1/(cmath.cos(gamma/2)-cmath.exp(1j*alpha));
-		return temp
-
-	for strtp1 in reversed(some_list):
-			try:
-				ans =  findroot(z4,strtp1)
-				alpha_save = ans
-				print "alpha_save:", alpha_save
-				if abs(alpha_save) < abs(alpha):
-					alpha = alpha_save;
-					print "alpha:", alpha
-			except ZeroDivisionError:
-				print "divide by zero"
-			except ValueError:
-				print "try another starting point"
-	'''
-	print "alpha, beta, gamma, delta:", alpha, beta, gamma, delta
-	nu00 = cmath.exp(1j*(alpha-beta/2-delta/2))*cmath.cos(gamma/2)
-	print "nu00", nu00
-	nu01 = -cmath.exp(1j*(alpha-beta/2+delta/2))*cmath.sin(gamma/2)
-	print "nu01", nu01
-	nu10 = cmath.exp(1j*(alpha+beta/2-delta/2))*cmath.sin(gamma/2)
-	print "nu10", nu10
-	nu11 = cmath.exp(1j*(alpha+beta/2+delta/2))*cmath.cos(gamma/2)
-	print "nu11", nu11
-else:
-	print "Calculate it by hand!"
-	'''
-	#set gamma=0
-	gamma = 0;
-
-	#First find beta & delta
-	def z1(beta,delta):
-		temp=cmath.exp(1j*(beta+delta))-u11/u00;
-		return temp
-
-	def z2(beta,delta):
-		temp=cmath.exp(1j*(beta-delta)); #+u10/u01; (zero anyway)
-		return temp
-
-	#for strtp1 in reversed(some_list):
-		#for strtp2 in reversed(some_list):
-
-	for strtp1, strtp2 in product(reversed(some_list), reversed(some_list)):
-			try:
-				print "strtp1", strtp1
-				print "strtp2", strtp2
-				ans =  findroot([z1,z2],(strtp1,strtp2));
-				beta_save = ans[0].real;
-				delta_save = ans[1].real;
-				if abs(beta_save) < abs(beta) and abs(delta_save) < abs(delta):
-					beta = beta_save;
-					delta = delta_save;
-					print "beta:", beta
-					print "delta:", delta
-					break
-			except ZeroDivisionError:
-				print "divide by zero"
-			except ValueError:
-				print "value error"
-
-	#Move on to finding gamma
-	def z3(alpha):
-		temp=u11*cmath.exp(-1j*alpha)*cmath.exp(1j*(-beta/2-delta/2))-cmath.cos(gamma/2);
-    		return temp
-	def z4(alpha):
-		temp=u10*cmath.exp(-1j*alpha)*cmath.exp(1j*(-beta/2+delta/2))-cmath.sin(gamma/2);
-    		return temp
-
-	for strtp1 in reversed(some_list):
-			try:
-				ans =  findroot([z3,z4],strtp1);
-				alpha_save = ans.real;
-				if abs(alpha_save) < abs(alpha):
-					alpha = alpha_save;
-					break
-			except ZeroDivisionError:
-				print "divide by zero"
-			except OverflowError:
-				print "overflow"
-	'''
+# Usage
+config = MatrixConfig(0.19509, -0.98079, 0.98079, 0.19509)
+decomp = MatrixDecomposition(config)
+result = decomp.decompose()
+print(result)
